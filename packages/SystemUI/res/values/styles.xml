@@ -94,6 +94,7 @@
         <!-- exposed for theming -->
         <item name="android:textColor">@color/exposed_primary_text_light</item>
     </style>
+
     <style name="TextAppearance.StatusBar.Expanded.Clock">
         <item name="android:textSize">@dimen/qs_time_expanded_size</item>
         <item name="android:fontFamily">sans-serif-medium</item>
