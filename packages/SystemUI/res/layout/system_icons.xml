@@ -27,13 +27,19 @@
         android:orientation="horizontal"/>
 
     <com.android.systemui.statusbar.policy.Traffic
-            android:id="@+id/traffic"
-            android:textAppearance="@style/TextAppearance.StatusBar.Traffic"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:singleLine="true"
-            android:layout_marginStart="2.5dp"
-            android:gravity="left|center_vertical"/>
+        android:id="@+id/traffic"
+        android:textAppearance="@style/TextAppearance.StatusBar.Traffic"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:singleLine="true"
+        android:layout_marginStart="2.5dp"
+        android:gravity="left|center_vertical"/>
+
+    <com.android.systemui.statusbar.policy.NetworkMeterView
+        android:id="@+id/network_meter"
+        android:layout_width="35dp"
+        android:layout_height="14.5dp"
+        android:layout_marginStart="2.5dp"/>
 
     <include layout="@layout/signal_cluster_view"
         android:id="@+id/signal_cluster"
