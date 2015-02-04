@@ -24,7 +24,6 @@ import android.content.Intent;
 import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.LayerDrawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.TrafficStats;
@@ -50,12 +49,25 @@ public class NetworkMeterView extends ImageView {
     /*
      * View related.
      */
+    /** The in network bandwith levels (in byte/s). */
+    protected static final long[] IN_NETWORK_LEVELS = new long[]{   // TODO Use resource array
+            1l,
+            5 * 1024l,
+            25 * 1024l,
+            125 * 1024l,
+            250 * 1024l,
+            450 * 1024l,
+            750 * 1024l,
+            1000 * 1024l
+    };
     /** The out network drawable layer id. */
     protected static final int OUT_NETWORK_DRAWABLE_LAYER_ID = 1;
     /** The in network drawable layer id. */
     protected static final int IN_NETWORK_DRAWABLE_LAYER_ID = 2;
-    /** The network out drawables cache. */
-    protected final Drawable[] mNetworkOutDrawables;
+    /** The network in drawables cache. */
+    protected final Drawable[] mNetworkInDrawables;
+    /** The currently displayed in level. */
+    protected int mInNetworkLevel;
     /** The view attached status (<code>true</code> if attached, <code>false</code> otherwise). */
     protected boolean mAttached;
     /** The layer drawable icon. */
@@ -117,14 +129,20 @@ public class NetworkMeterView extends ImageView {
         mAttached = false;
         // Create drawables caches
         Resources resources = getResources();
-        mNetworkOutDrawables = new Drawable[] {
-                resources.getDrawable(R.drawable.stat_sys_network_out_0),
-                resources.getDrawable(R.drawable.stat_sys_network_out_1),
-                resources.getDrawable(R.drawable.stat_sys_network_out_2),
-                resources.getDrawable(R.drawable.stat_sys_network_out_3),
-                resources.getDrawable(R.drawable.stat_sys_network_out_4)
+        mNetworkInDrawables = new Drawable[]{    // TODO Test drawable cache
+                resources.getDrawable(R.drawable.stat_sys_network_in_0),
+                resources.getDrawable(R.drawable.stat_sys_network_in_1),
+                resources.getDrawable(R.drawable.stat_sys_network_in_2),
+                resources.getDrawable(R.drawable.stat_sys_network_in_3),
+                resources.getDrawable(R.drawable.stat_sys_network_in_4),
+                resources.getDrawable(R.drawable.stat_sys_network_in_5),
+                resources.getDrawable(R.drawable.stat_sys_network_in_6),
+                resources.getDrawable(R.drawable.stat_sys_network_in_7),
+                resources.getDrawable(R.drawable.stat_sys_network_in_8)
         };
-        setImageDrawable(mNetworkOutDrawables[0]);
+        // Initialize image view drawable
+        mInNetworkLevel = 0;
+        setImageDrawable(mNetworkInDrawables[mInNetworkLevel]);
         //Drawable inNetworkDrawable = resources.getDrawable(R.drawable.stat_sys_network_out_0);    // TODO
         // Create layer drawable
         //Drawable[] networkDrawables = new Drawable[] {outNetworkDrawable};  // TODO inNetworkDrawable
@@ -146,7 +164,7 @@ public class NetworkMeterView extends ImageView {
             @Override
             public void run() {
                 updateMeter();
-                mTrafficHandler.removeCallbacks(mTrafficUpdater);
+                mTrafficHandler.removeCallbacks(mTrafficUpdater); // TODO Test synchronized
                 mTrafficHandler.postDelayed(mTrafficUpdater, mTrafficUpdateInterval);
             }
         };
@@ -156,7 +174,7 @@ public class NetworkMeterView extends ImageView {
          * Initialize setting monitoring.
          */
         // Create setting observer
-        SettingsObserver settingsObserver = new SettingsObserver(new Handler(), Settings.System.STATUS_BAR_TRAFFIC,
+        SettingsObserver settingsObserver = new SettingsObserver(Settings.System.STATUS_BAR_TRAFFIC,
                 new SettingsChangeCallback() {
                     @Override
                     public void onSettingChanged() {
@@ -210,14 +228,6 @@ public class NetworkMeterView extends ImageView {
         }
     }
 
-    int[] drawablesId = new int[] {
-            R.drawable.stat_sys_network_out_0,
-            R.drawable.stat_sys_network_out_1,
-            R.drawable.stat_sys_network_out_2,
-            R.drawable.stat_sys_network_out_3,
-            R.drawable.stat_sys_network_out_4,
-    };
-
     /**
      * Update meter diplay.<br/>
      * Compute network quality based on traffic then update meter display.
@@ -226,7 +236,7 @@ public class NetworkMeterView extends ImageView {
 
         long tempUpdateTime = SystemClock.elapsedRealtime();
         long delay = (tempUpdateTime - lastUpdateTime) / 1000;
-        Log.d("NETWORK METER", "Delai: "+delay+" s");
+        Log.d("NETWORK METER", "Delay: " + delay + " s");
         if (delay == 0) {
             // we just updated the view, nothing further to do
             return;
@@ -235,38 +245,25 @@ public class NetworkMeterView extends ImageView {
         long tempRxBytes = TrafficStats.getTotalRxBytes();
         long speed = (tempRxBytes - totalRxBytes) / delay;
 
-        speed /= 1024;
-        Log.d("NETWORK METER", "Speed: "+speed+" kb/s");
-        speed /= 100;
-        if (speed<0)
-            speed = 0;
-        else if (speed >= drawablesId.length)
-            speed = drawablesId.length-1;
-
+        int inNetworkLevel = 0;
+        for (int i = 0, n = IN_NETWORK_LEVELS.length; i < n; i++) {
+            if (speed < IN_NETWORK_LEVELS[i]) {
+                break;
+            }
+            inNetworkLevel++;
+        }
+        Log.d("NETWORK METER", "Speed: " + (speed / 1024) + " kb/s (level+" + inNetworkLevel + ")");
 
         totalRxBytes = tempRxBytes;
         lastUpdateTime = tempUpdateTime;
 
-        Drawable outNetworkDrawable = mNetworkOutDrawables[(int)speed];
-        setImageDrawable(outNetworkDrawable);
-
-        /*
-
-        mLayerDrawable.setDrawableByLayerId(OUT_NETWORK_DRAWABLE_LAYER_ID,
-                getResources().getDrawable(drawablesId[(int)speed]));
-        setImageDrawable(mLayerDrawable);
-
-        */
-
-        /* if (((float) speed) / 1048576 >= 1) { // 1024 * 1024
-            setText(decimalFormat.format(((float) speed) / 1048576f) + "MB/s");
-        } else if (((float) speed) / 1024f >= 1) {
-            setText(decimalFormat.format(((float) speed) / 1024f) + "KB/s");
-        } else if (speed > 0) {
-            setText(speed + "B/s");
-        } else {
-            setText("");
-        }*/
+        // Check if in network level has changed
+        if (inNetworkLevel != mInNetworkLevel) {
+            // Save new in network level
+            mInNetworkLevel = inNetworkLevel;
+            // Update image drawable
+            setImageDrawable(mNetworkInDrawables[inNetworkLevel]);
+        }
     }
 
     /**
@@ -298,25 +295,36 @@ public class NetworkMeterView extends ImageView {
      * Start the traffic monitor.
      */
     protected void startTrafficMonitor() {
-        // Check if traffic is already monitored
-        if (mTrafficMonitored) {
-            return;
+        // Prevent race condition
+        synchronized (mTrafficHandler) {
+            // Check if traffic is already monitored
+            if (mTrafficMonitored) {
+                return;
+            }
+            // Mark traffic as monitored
+            mTrafficMonitored = true;
+            Log.d("NETWORK METER", "Start traffic monitor");
+            // Start the updater
+            mTrafficUpdater.run();
         }
-        Log.d("NETWORK METER", "Start traffic monitor");
-        // Start the updater
-        mTrafficUpdater.run();
     }
 
     /**
      * Stop the traffic monitor.
      */
     protected void stopTrafficMonitor() {
-        // Check if traffic is monitored
-        if (!mTrafficMonitored) {
-            return;
+        // Prevent race condition
+        synchronized (mTrafficHandler) {
+            // Check if traffic is monitored
+            if (!mTrafficMonitored) {
+                return;
+            }
+            // Stop traffic handler
+            mTrafficHandler.removeCallbacks(mTrafficUpdater);
+            // Mark traffic as not monitored
+            mTrafficMonitored = false;
+            Log.d("NETWORK METER", "Stop traffic monitor");
         }
-        // Stop traffic handler
-        mTrafficHandler.removeCallbacks(mTrafficUpdater);
     }
 
     /**
@@ -346,8 +354,14 @@ public class NetworkMeterView extends ImageView {
         /** The callback to call on setting change. */
         private final SettingsChangeCallback mCallback;
 
-        public SettingsObserver(Handler handler, String settingName, SettingsChangeCallback callback) {
-            super(handler);
+        /**
+         * Constructor.
+         *
+         * @param settingName The setting name to observe.
+         * @param callback    The callback to notify on setting change.
+         */
+        public SettingsObserver(String settingName, SettingsChangeCallback callback) {
+            super(null);
             // Get content resolver
             ContentResolver resolver = mContext.getContentResolver();
             // Register observer for desired setting
