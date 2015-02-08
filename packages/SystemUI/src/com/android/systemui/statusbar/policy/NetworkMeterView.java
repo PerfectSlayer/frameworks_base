@@ -37,62 +37,40 @@ import android.widget.ImageView;
 
 import com.android.systemui.R;
 
+import java.lang.*;
+import java.lang.Object;
 import java.lang.Override;
 import java.lang.Runnable;
+import java.lang.Thread;
+import java.util.Observable;
+import java.util.Observer;
 
 /**
  * Display a network meter.
  *
  * @author Bruce BUJON (bruce.bujon@gmail.com)
  */
-public class NetworkMeterView extends ImageView {
+public class NetworkMeterView extends ImageView implements Observer {
+    /** The network meter log tag. */
+    private static final String LOG_TAG = "NETWORK_METER";
     /*
      * View related.
      */
-    /** The in network bandwith levels (in byte/s). */
-    protected static final long[] IN_NETWORK_LEVELS = new long[]{   // TODO Use resource array
-            1l,
-            5 * 1024l,
-            25 * 1024l,
-            125 * 1024l,
-            250 * 1024l,
-            450 * 1024l,
-            750 * 1024l,
-            1000 * 1024l
-    };
     /** The out network drawable layer id. */
     protected static final int OUT_NETWORK_DRAWABLE_LAYER_ID = 1;
     /** The in network drawable layer id. */
     protected static final int IN_NETWORK_DRAWABLE_LAYER_ID = 2;
     /** The network in drawables cache. */
     protected final Drawable[] mNetworkInDrawables;
-    /** The currently displayed in level. */
-    protected int mInNetworkLevel;
     /** The view attached status (<code>true</code> if attached, <code>false</code> otherwise). */
     protected boolean mAttached;
     /** The layer drawable icon. */
     //protected final LayerDrawable mLayerDrawable;
     /*
-     * Traffic related.
-     */
-    /** The traffic monitor status (<code>true</code> if monitored, <code>false</code> otherwise). */
-    protected boolean mTrafficMonitored;
-    /** The traffic handler. */
-    protected final Handler mTrafficHandler;
-    /** The traffic updater. */
-    protected final Runnable mTrafficUpdater;
-    /** The traffic updater interval (in ms). */
-    protected long mTrafficUpdateInterval;
-    /*
      * Settings related.
      */
     /** The intent receiver for connectivity action. */
     protected final BroadcastReceiver mIntentReceiver;
-
-
-    // TODO Improve
-    long totalRxBytes;
-    long lastUpdateTime;
 
     /**
      * Constructor.
@@ -141,8 +119,7 @@ public class NetworkMeterView extends ImageView {
                 resources.getDrawable(R.drawable.stat_sys_network_in_8)
         };
         // Initialize image view drawable
-        mInNetworkLevel = 0;
-        setImageDrawable(mNetworkInDrawables[mInNetworkLevel]);
+        setImageDrawable(mNetworkInDrawables[0]);
         //Drawable inNetworkDrawable = resources.getDrawable(R.drawable.stat_sys_network_out_0);    // TODO
         // Create layer drawable
         //Drawable[] networkDrawables = new Drawable[] {outNetworkDrawable};  // TODO inNetworkDrawable
@@ -152,24 +129,6 @@ public class NetworkMeterView extends ImageView {
         // mLayerDrawable.setId(1, IN_NETWORK_DRAWABLE_LAYER_ID);   // TODO
         // Apply layer drawable
         // setImageDrawable(mLayerDrawable);    // TODO
-        /*
-         * Initialize traffic monitoring.
-         */
-        // Initialize traffic as not monitored
-        mTrafficMonitored = false;
-        // Create traffic handler
-        mTrafficHandler = new Handler();
-        // Create traffic updater
-        mTrafficUpdater = new Runnable() {
-            @Override
-            public void run() {
-                updateMeter();
-                mTrafficHandler.removeCallbacks(mTrafficUpdater); // TODO Test synchronized
-                mTrafficHandler.postDelayed(mTrafficUpdater, mTrafficUpdateInterval);
-            }
-        };
-        // Initiliaze traffic updater interval
-        mTrafficUpdateInterval = 2000;
         /*
          * Initialize setting monitoring.
          */
@@ -181,7 +140,7 @@ public class NetworkMeterView extends ImageView {
                         // Update enable status
                         updateEnableSettings();
                     }
-                });
+                }); // TODO unreg callback on detach
         // Create intent receiver
         mIntentReceiver = new BroadcastReceiver() {
             @Override
@@ -202,15 +161,16 @@ public class NetworkMeterView extends ImageView {
         // Delegate view attachment
         super.onAttachedToWindow();
         // Check if view already attached
-        if (!mAttached) {
-            // Mark view as attached
-            mAttached = true;
-            // Create intent filter for connectivity action
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
-            // Register intent receiver
-            mContext.registerReceiver(mIntentReceiver, filter, null, getHandler());
+        if (mAttached) {
+            return;
         }
+        // Mark view as attached
+        mAttached = true;
+        // Create intent filter for connectivity action
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+        // Register intent receiver
+        mContext.registerReceiver(mIntentReceiver, filter, null, getHandler());
         // Force update enable settings
         updateEnableSettings();
     }
@@ -220,55 +180,20 @@ public class NetworkMeterView extends ImageView {
         // Delegate view detachment
         super.onDetachedFromWindow();
         // Check if view is attached
-        if (mAttached) {
-            // Unregister intent receiver
-            mContext.unregisterReceiver(mIntentReceiver);
-            // Mark view as detached
-            mAttached = false;
-        }
-    }
-
-    /**
-     * Update meter diplay.<br/>
-     * Compute network quality based on traffic then update meter display.
-     */
-    protected void updateMeter() {
-
-        long tempUpdateTime = SystemClock.elapsedRealtime();
-        long delay = (tempUpdateTime - lastUpdateTime) / 1000;
-        Log.d("NETWORK METER", "Delay: " + delay + " s");
-        if (delay == 0) {
-            // we just updated the view, nothing further to do
+        if (!mAttached) {
             return;
         }
-
-        long tempRxBytes = TrafficStats.getTotalRxBytes();
-        long speed = (tempRxBytes - totalRxBytes) / delay;
-
-        int inNetworkLevel = 0;
-        for (int i = 0, n = IN_NETWORK_LEVELS.length; i < n; i++) {
-            if (speed < IN_NETWORK_LEVELS[i]) {
-                break;
-            }
-            inNetworkLevel++;
-        }
-        Log.d("NETWORK METER", "Speed: " + (speed / 1024) + " kb/s (level+" + inNetworkLevel + ")");
-
-        totalRxBytes = tempRxBytes;
-        lastUpdateTime = tempUpdateTime;
-
-        // Check if in network level has changed
-        if (inNetworkLevel != mInNetworkLevel) {
-            // Save new in network level
-            mInNetworkLevel = inNetworkLevel;
-            // Update image drawable
-            setImageDrawable(mNetworkInDrawables[inNetworkLevel]);
-        }
+        // Unregister intent receiver
+        mContext.unregisterReceiver(mIntentReceiver);
+        // Remove as traffic observer
+        NetworkTrafficMonitor.INSTANCE.removeObserver(this);
+        // Mark view as detached
+        mAttached = false;
     }
 
     /**
      * Update enable settings.<br/>
-     * Display or hide network meter and start or stop traffic montoring.
+     * Display or hide network meter and register or not as traffic monitor listener.
      */
     protected void updateEnableSettings() {
         // Check statusbar network meter setting
@@ -278,52 +203,16 @@ public class NetworkMeterView extends ImageView {
         if (showMeter && isConnected()) {
             // Ensurve view is attached
             if (mAttached) {
-                // Start traffic monitor
-                startTrafficMonitor();
+                // Add as traffic observer
+                NetworkTrafficMonitor.INSTANCE.addObserver(this);
             }
             // Set meter visibility as visible
             setVisibility(View.VISIBLE);
         } else {
             // Set meter visibility as gone
             setVisibility(View.GONE);
-            // Stop traffic monitor
-            stopTrafficMonitor();
-        }
-    }
-
-    /**
-     * Start the traffic monitor.
-     */
-    protected void startTrafficMonitor() {
-        // Prevent race condition
-        synchronized (mTrafficHandler) {
-            // Check if traffic is already monitored
-            if (mTrafficMonitored) {
-                return;
-            }
-            // Mark traffic as monitored
-            mTrafficMonitored = true;
-            Log.d("NETWORK METER", "Start traffic monitor");
-            // Start the updater
-            mTrafficUpdater.run();
-        }
-    }
-
-    /**
-     * Stop the traffic monitor.
-     */
-    protected void stopTrafficMonitor() {
-        // Prevent race condition
-        synchronized (mTrafficHandler) {
-            // Check if traffic is monitored
-            if (!mTrafficMonitored) {
-                return;
-            }
-            // Stop traffic handler
-            mTrafficHandler.removeCallbacks(mTrafficUpdater);
-            // Mark traffic as not monitored
-            mTrafficMonitored = false;
-            Log.d("NETWORK METER", "Stop traffic monitor");
+            // Remove as traffic observer
+            NetworkTrafficMonitor.INSTANCE.removeObserver(this);
         }
     }
 
@@ -343,6 +232,38 @@ public class NetworkMeterView extends ImageView {
         }
         // Check if active network is connected
         return networkInfo.isConnected();
+    }
+
+    /*
+     * Observer.
+     */
+
+    long lastUpdateTime;    // TODO remove
+
+    @Override
+    public void update(Observable observable, Object data) {
+        // Check data
+        if (!(data instanceof Integer)) {
+            return;
+        }
+        // Get in network level
+        int inNetworkLevel = (int) data;
+
+        long tempUpdateTime = SystemClock.elapsedRealtime();
+        long delay = (tempUpdateTime - lastUpdateTime) / 1000;
+        Log.d(NetworkMeterView.LOG_TAG, "Delay: " + delay + " s");
+        if (delay == 0) {
+            // we just updated the view, nothing further to do
+            return;
+        }
+        Log.d(NetworkMeterView.LOG_TAG, "Debug: " + this.hashCode() + " " + isShown());
+
+        // Check if view is shown
+        if (!isShown()) {
+            return;
+        }
+        // Update image drawable
+        setImageDrawable(mNetworkInDrawables[inNetworkLevel]);
     }
 
     /**
