@@ -38,7 +38,7 @@ public enum NetworkTrafficMonitor {
     /** The network monitor log tag. */
     private static final String LOG_TAG = "NETWORK_MONITOR";
     /** The in network bandwith levels (in byte/s). */
-    private static final long[] IN_NETWORK_LEVELS = new long[]{   // TODO Use resource array
+    private static final long[] IN_NETWORK_LEVELS = new long[]{
             1l,
             5 * 1024l,
             25 * 1024l,
@@ -54,17 +54,16 @@ public enum NetworkTrafficMonitor {
     private final Handler mTrafficHandler;
     /** The traffic updater. */
     private final Runnable mTrafficUpdater;
+    /** The observable to delegate change notification. */
+    private final DelegateObservable mObservable;
     /** The traffic updater interval (in ms). */
     private long mTrafficUpdateInterval;
     /** The in network quality level. */
     private int mInNetworkLevel;
-    /** The observable to delegate change notification. */
-    private final DelegateObservable mObservable;
-
-
-    // TODO Improve
-    long totalRxBytes;
-    long lastUpdateTime;
+    /** The total received bytes counter (in bytes). */
+    long mTotalRxBytes;
+    /** The last update time (relative to boot, in ms). */
+    long mLastUpdateTime;
 
     /**
      * Constructor.
@@ -79,16 +78,15 @@ public enum NetworkTrafficMonitor {
             @Override
             public void run() {
                 monitorTraffic();
-                //mTrafficHandler.removeCallbacks(mTrafficUpdater); // TODO Test synchronized
                 mTrafficHandler.postDelayed(mTrafficUpdater, mTrafficUpdateInterval);
             }
         };
+        // Initialize observable
+        mObservable = new DelegateObservable();
         // Initiliaze traffic updater interval
         mTrafficUpdateInterval = 2000;
         // Initialize in network quality level
         mInNetworkLevel = 0;
-        // Initialize observable
-        mObservable = new DelegateObservable();
     }
 
     /**
@@ -161,18 +159,23 @@ public enum NetworkTrafficMonitor {
      * Compute network quality level based on data received.
      */
     protected void monitorTraffic() {
-
-        long tempUpdateTime = SystemClock.elapsedRealtime();
-        long delay = (tempUpdateTime - lastUpdateTime) / 1000;
-        Log.d(NetworkTrafficMonitor.LOG_TAG, "Delay: " + delay + " s");
-        if (delay == 0) {
-            // we just updated the view, nothing further to do
+        // Get current time
+        long lastUpdateTime = SystemClock.elapsedRealtime();
+        // Compute update delay
+        long updateDelay = (lastUpdateTime - mLastUpdateTime) / 1000;
+        // Save last update time
+        mLastUpdateTime = lastUpdateTime;
+        Log.d(NetworkTrafficMonitor.LOG_TAG, "Delay: " + updateDelay + " s");
+        if (updateDelay == 0) {
             return;
         }
-
-        long tempRxBytes = TrafficStats.getTotalRxBytes();
-        long speed = (tempRxBytes - totalRxBytes) / delay;
-
+        // Get total received bytes
+        long totalRxBytes = TrafficStats.getTotalRxBytes();
+        // Compute in network speed
+        long speed = (totalRxBytes - mTotalRxBytes) / updateDelay;
+        // Save total received bytes
+        mTotalRxBytes = totalRxBytes;
+        // Compute in network level
         int inNetworkLevel = 0;
         for (int i = 0, n = IN_NETWORK_LEVELS.length; i < n; i++) {
             if (speed < IN_NETWORK_LEVELS[i]) {
@@ -181,10 +184,6 @@ public enum NetworkTrafficMonitor {
             inNetworkLevel++;
         }
         Log.d(NetworkTrafficMonitor.LOG_TAG, "Speed: " + (speed / 1024) + " kb/s (level+" + inNetworkLevel + ")");
-
-
-        totalRxBytes = tempRxBytes;
-        lastUpdateTime = tempUpdateTime;
         // Check if in network quality level has changed
         if (inNetworkLevel != mInNetworkLevel) {
             // Save in network level quality
