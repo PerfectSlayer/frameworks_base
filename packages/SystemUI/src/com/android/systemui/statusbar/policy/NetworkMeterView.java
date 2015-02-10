@@ -128,7 +128,7 @@ public class NetworkMeterView extends ImageView implements Observer {
          * Initialize setting monitoring.
          */
         // Create setting observer
-        mSettingsObserver = new SettingsObserver(Settings.System.STATUS_BAR_TRAFFIC,
+        mSettingsObserver = new SettingsObserver(Settings.System.NETWORK_METER_ENABLED,
                 new SettingsChangeCallback() {
                     @Override
                     public void onSettingChanged() {
@@ -197,7 +197,7 @@ public class NetworkMeterView extends ImageView implements Observer {
     protected void updateEnableSettings() {
         // Check statusbar network meter setting
         ContentResolver resolver = mContext.getContentResolver();
-        boolean showMeter = Settings.System.getInt(resolver, Settings.System.STATUS_BAR_TRAFFIC, 0) == 1;
+        boolean showMeter = Settings.System.getInt(resolver, Settings.System.NETWORK_METER_ENABLED, 0) == 1;
         // Check if meter should be showed and device is connected
         if (showMeter && isConnected()) {
             // Ensurve view is attached

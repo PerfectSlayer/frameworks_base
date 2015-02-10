@@ -2154,10 +2154,10 @@ public final class Settings {
         public static final String STATUS_BAR_TICKER_ENABLED = "status_bar_ticker_enabled";
 
         /**
-         * Network speed indicator.
+         * Whether to enable network meter in status bar.
          * @hide
          */
-        public static final String STATUS_BAR_TRAFFIC = "status_bar_traffic";
+        public static final String NETWORK_METER_ENABLED = "network_meter_enabled";
 
         /**
          * Control whether the process CPU usage meter should be shown.
