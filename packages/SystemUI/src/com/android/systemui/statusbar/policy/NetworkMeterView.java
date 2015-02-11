@@ -197,7 +197,7 @@ public class NetworkMeterView extends ImageView implements Observer {
     protected void updateEnableSettings() {
         // Check statusbar network meter setting
         ContentResolver resolver = mContext.getContentResolver();
-        boolean showMeter = Settings.System.getInt(resolver, Settings.System.NETWORK_METER_ENABLED, 0) == 1;
+        boolean showMeter = Settings.System.getInt(resolver, Settings.System.NETWORK_METER_ENABLED, 1) == 1;
         // Check if meter should be showed and device is connected
         if (showMeter && isConnected()) {
             // Ensurve view is attached
