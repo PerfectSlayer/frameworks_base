@@ -133,7 +133,7 @@ public class NetworkMeterView extends ImageView implements Observer {
                     @Override
                     public void onSettingChanged() {
                         // Update enable status
-                        updateEnableSettings();
+                        updateEnabledSettings();
                     }
                 });
         // Create intent receiver
@@ -143,12 +143,12 @@ public class NetworkMeterView extends ImageView implements Observer {
                 // Check intent action
                 if (ConnectivityManager.CONNECTIVITY_ACTION.equals(intent.getAction())) {
                     // Update enable status
-                    updateEnableSettings();
+                    updateEnabledSettings();
                 }
             }
         };
         // Force setting loading
-        updateEnableSettings();
+        updateEnabledSettings();
     }
 
     @Override
@@ -169,7 +169,7 @@ public class NetworkMeterView extends ImageView implements Observer {
         // Register setting observer
         mSettingsObserver.register();
         // Force update enable settings
-        updateEnableSettings();
+        updateEnabledSettings();
     }
 
     @Override
@@ -194,10 +194,12 @@ public class NetworkMeterView extends ImageView implements Observer {
      * Update enable settings.<br/>
      * Display or hide network meter and register or not as traffic monitor listener.
      */
-    protected void updateEnableSettings() {
+    protected void updateEnabledSettings() {
         // Check statusbar network meter setting
         ContentResolver resolver = mContext.getContentResolver();
         boolean showMeter = Settings.System.getInt(resolver, Settings.System.NETWORK_METER_ENABLED, 1) == 1;
+        // Declare visibility
+        int visibility;
         // Check if meter should be showed and device is connected
         if (showMeter && isConnected()) {
             // Ensurve view is attached
@@ -206,13 +208,23 @@ public class NetworkMeterView extends ImageView implements Observer {
                 NetworkTrafficMonitor.INSTANCE.addObserver(this);
             }
             // Set meter visibility as visible
-            setVisibility(View.VISIBLE);
+            visibility = View.VISIBLE;
         } else {
             // Set meter visibility as gone
-            setVisibility(View.GONE);
+            visibility = View.GONE;
             // Remove as traffic observer
             NetworkTrafficMonitor.INSTANCE.removeObserver(this);
         }
+        // Prepare visibility to postpone
+        final int postVisibility = visibility;
+        // Request to change visibility
+        post(new Runnable() {
+            @Override
+            public void run() {
+                // Apply visibility
+                setVisibility(postVisibility);
+            }
+        });
     }
 
     /**
