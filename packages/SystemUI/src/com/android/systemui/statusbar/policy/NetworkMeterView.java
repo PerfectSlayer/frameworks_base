@@ -22,11 +22,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
-import android.database.ContentObserver;
 import android.graphics.drawable.Drawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.net.Uri;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.AttributeSet;
@@ -34,6 +32,7 @@ import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import com.android.systemui.R;
+import com.google.android.collect.Sets;
 
 import java.util.Observable;
 import java.util.Observer;
@@ -44,27 +43,41 @@ import java.util.Observer;
  * @author Bruce BUJON (bruce.bujon@gmail.com)
  */
 public class NetworkMeterView extends ImageView implements Observer {
-    /** The network meter log tag. */
+    /**
+     * The network meter log tag.
+     */
     private static final String LOG_TAG = "NETWORK_METER";
     /*
      * View related.
      */
-    /** The out network drawable layer id. */
+    /**
+     * The out network drawable layer id.
+     */
     protected static final int OUT_NETWORK_DRAWABLE_LAYER_ID = 1;
-    /** The in network drawable layer id. */
+    /**
+     * The in network drawable layer id.
+     */
     protected static final int IN_NETWORK_DRAWABLE_LAYER_ID = 2;
-    /** The network in drawables cache. */
+    /**
+     * The network in drawables cache.
+     */
     protected final Drawable[] mNetworkInDrawables;
-    /** The view attached status (<code>true</code> if attached, <code>false</code> otherwise). */
+    /**
+     * The view attached status (<code>true</code> if attached, <code>false</code> otherwise).
+     */
     protected boolean mAttached;
     /** The layer drawable icon. */
     //protected final LayerDrawable mLayerDrawable;
     /*
      * Settings related.
      */
-    /** The settings observer. */
-    protected final SettingsObserver mSettingsObserver;
-    /** The intent receiver for connectivity action. */
+    /**
+     * The settings observer.
+     */
+    protected final NetworkTrafficMonitor.SettingsObserver mSettingsObserver;
+    /**
+     * The intent receiver for connectivity action.
+     */
     protected final BroadcastReceiver mIntentReceiver;
 
     /**
@@ -98,7 +111,7 @@ public class NetworkMeterView extends ImageView implements Observer {
         /*
          * Initialize view.
          */
-        // Initialive view as detached
+        // Initialize view as detached
         mAttached = false;
         // Create drawables caches
         Resources resources = getResources();
@@ -128,12 +141,13 @@ public class NetworkMeterView extends ImageView implements Observer {
          * Initialize setting monitoring.
          */
         // Create setting observer
-        mSettingsObserver = new SettingsObserver(Settings.System.NETWORK_METER_ENABLED,
-                new SettingsChangeCallback() {
+        mSettingsObserver = new NetworkTrafficMonitor.SettingsObserver(mContext,
+                Sets.newHashSet(Settings.System.NETWORK_TRAFFIC_STATE),
+                new NetworkTrafficMonitor.SettingsChangeCallback() {
                     @Override
                     public void onSettingChanged() {
                         // Update enable status
-                        updateEnabledSettings();
+                        updateSettings();
                     }
                 });
         // Create intent receiver
@@ -143,12 +157,12 @@ public class NetworkMeterView extends ImageView implements Observer {
                 // Check intent action
                 if (ConnectivityManager.CONNECTIVITY_ACTION.equals(intent.getAction())) {
                     // Update enable status
-                    updateEnabledSettings();
+                    updateSettings();
                 }
             }
         };
         // Force setting loading
-        updateEnabledSettings();
+        updateSettings();
     }
 
     @Override
@@ -169,7 +183,7 @@ public class NetworkMeterView extends ImageView implements Observer {
         // Register setting observer
         mSettingsObserver.register();
         // Force update enable settings
-        updateEnabledSettings();
+        updateSettings();
     }
 
     @Override
@@ -194,15 +208,16 @@ public class NetworkMeterView extends ImageView implements Observer {
      * Update enable settings.<br/>
      * Display or hide network meter and register or not as traffic monitor listener.
      */
-    protected void updateEnabledSettings() {
-        // Check statusbar network meter setting
+    protected void updateSettings() {
+        // Check status bar network meter setting
         ContentResolver resolver = mContext.getContentResolver();
-        boolean showMeter = Settings.System.getInt(resolver, Settings.System.NETWORK_METER_ENABLED, 1) == 1;
+        int networkTrafficState = Settings.System.getInt(resolver, Settings.System.network_traffic_state, 0);
+        boolean showMeter = NetworkTrafficMonitor.SettingsObserver.hasMask(networkTrafficState, NetworkTrafficMonitor.SettingsObserver.METER_ENABLED_MASK);
         // Declare visibility
         int visibility;
         // Check if meter should be showed and device is connected
-        if (showMeter && isConnected()) {
-            // Ensurve view is attached
+        if (showMeter&&isConnected()) {
+            // Ensure view is attached
             if (mAttached) {
                 // Add as traffic observer
                 NetworkTrafficMonitor.INSTANCE.addObserver(this);
@@ -238,7 +253,7 @@ public class NetworkMeterView extends ImageView implements Observer {
                 .getSystemService(Context.CONNECTIVITY_SERVICE);
         // Get active network
         NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
-        if (networkInfo == null) {
+        if (networkInfo==null) {
             return false;
         }
         // Check if active network is connected
@@ -254,82 +269,21 @@ public class NetworkMeterView extends ImageView implements Observer {
     @Override
     public void update(Observable observable, Object data) {
         long tempUpdateTime = SystemClock.elapsedRealtime();
-        long delay = (tempUpdateTime - lastUpdateTime) / 1000;
-        Log.d(NetworkMeterView.LOG_TAG, "Delay: " + delay + " s");
-        Log.d(NetworkMeterView.LOG_TAG, "Debug: " + this.hashCode() + " " + isShown());
+        long delay = (tempUpdateTime-lastUpdateTime)/1000;
+        Log.d(NetworkMeterView.LOG_TAG, "Delay: "+delay+" s");
+        Log.d(NetworkMeterView.LOG_TAG, "Debug: "+this.hashCode()+" "+isShown());
 
         // Check data
         if (!(data instanceof Integer)) {
             return;
         }
         // Get in network level
-        int inNetworkLevel = (int) data;
+        int inNetworkLevel = ((Integer) data).intValue();
         // Check if view is shown
         if (!isShown()) {
             return;
         }
         // Update image drawable
         setImageDrawable(mNetworkInDrawables[inNetworkLevel]);
-    }
-
-    /**
-     * Observe a setting change.
-     *
-     * @author Bruce BUJON (bruce.bujon@gmail.com)
-     */
-    private class SettingsObserver extends ContentObserver {
-        /** The observe setting URI. */
-        private final Uri mSettingUri;
-        /** The callback to call on setting change. */
-        private final SettingsChangeCallback mCallback;
-
-        /**
-         * Constructor.
-         *
-         * @param settingName The setting name to observe.
-         * @param callback    The callback to notify on setting change.
-         */
-        public SettingsObserver(String settingName, SettingsChangeCallback callback) {
-            super(null);
-            // Save obsvere setting
-            mSettingUri = Settings.System.getUriFor(settingName);
-            // Save callback
-            mCallback = callback;
-        }
-
-        /**
-         * Register the observer.
-         */
-        public void register() {
-            // Get content resolver
-            ContentResolver resolver = mContext.getContentResolver();
-            // Register the observer
-            resolver.registerContentObserver(mSettingUri, false, this);
-        }
-
-        /**
-         * Unregister the observer.
-         */
-        public void unregister() {
-            // Get content resolver
-            ContentResolver resolver = mContext.getContentResolver();
-            // Unregister the observer
-            resolver.unregisterContentObserver(this);
-        }
-
-        @Override
-        public void onChange(boolean selfChange) {
-            // Notify callback
-            mCallback.onSettingChanged();
-        }
-    }
-
-    /**
-     * Callback for setting change.
-     *
-     * @author Bruce BUJON (bruce.bujon@gmail.com)
-     */
-    private interface SettingsChangeCallback {
-        public void onSettingChanged();
     }
 }
