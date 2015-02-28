@@ -49,9 +49,22 @@ public enum NetworkTrafficMonitor {
      */
     private static final String LOG_TAG = "NETWORK_MONITOR";
     /**
-     * The in network bandwith levels (in byte/s).
+     * The in network bandwidth levels (in byte/s).
      */
     private static final long[] IN_NETWORK_LEVELS = new long[]{
+            1l,
+            5*1024l,
+            25*1024l,
+            125*1024l,
+            250*1024l,
+            450*1024l,
+            750*1024l,
+            1000*1024l
+    };
+    /**
+     * The out network bandwidth levels (in byte/s).
+     */
+    private static final long[] OUT_NETWORK_LEVELS = new long[]{    // TODO Define levels
             1l,
             5*1024l,
             25*1024l,
@@ -82,13 +95,17 @@ public enum NetworkTrafficMonitor {
      */
     private long mTrafficUpdateInterval;
     /**
-     * The in network quality level.
+     * The out network quality level.
      */
-    private int mInNetworkLevel;
+    private int mOutNetworkLevel;
     /**
      * The total received bytes counter (in bytes).
      */
     long mTotalRxBytes;
+    /**
+     * The total transmitted bytes counter (in bytes).
+     */
+    long mTotalTxBytes;
     /**
      * The last update time (relative to boot, in ms).
      */
@@ -114,8 +131,6 @@ public enum NetworkTrafficMonitor {
         mObservable = new DelegateObservable();
         // Initialize traffic updater interval
         mTrafficUpdateInterval = 2000;
-        // Initialize in network quality level
-        mInNetworkLevel = 0;
     }
 
     /**
@@ -186,7 +201,7 @@ public enum NetworkTrafficMonitor {
 
     /**
      * Monitor traffic.<br/>
-     * Compute network quality level based on data received.
+     * Compute network quality levels based on data received and transmitted.
      */
     protected void monitorTraffic() {
         // Get current time
@@ -201,42 +216,46 @@ public enum NetworkTrafficMonitor {
         }
         // Get total received bytes
         long totalRxBytes = TrafficStats.getTotalRxBytes();
+        // Get total transmitted bytes
+        long totalTxBytes = TrafficStats.getTotalTxBytes();
         // Compute in network speed
-        long speed = (totalRxBytes-mTotalRxBytes)/updateDelay;
+        long inSpeed = (totalRxBytes-mTotalRxBytes)/updateDelay;
+        // Compute out network speed
+        long outSpeed = (totalTxBytes-mTotalTxBytes)/updateDelay;
         // Save total received bytes
         mTotalRxBytes = totalRxBytes;
+        // Save total transmitted bytes
+        mTotalTxBytes = totalTxBytes;
         // Compute in network level
         int inNetworkLevel = 0;
         for (int i = 0, n = IN_NETWORK_LEVELS.length; i<n; i++) {
-            if (speed<IN_NETWORK_LEVELS[i]) {
+            if (inSpeed<IN_NETWORK_LEVELS[i]) {
                 break;
             }
             inNetworkLevel++;
         }
-        Log.d(NetworkTrafficMonitor.LOG_TAG, "Speed: "+(speed/1024)+" kb/s (level+"+inNetworkLevel+")");
-        // Check if in network quality level has changed
-        if (inNetworkLevel!=mInNetworkLevel) {
-            // Save in network level quality
-            mInNetworkLevel = inNetworkLevel;
-            // Mark observable as changed
-            mObservable.setChanged();
-            // Notify observers
-            mObservable.notifyObservers(inNetworkLevel);
-            Log.d(NetworkTrafficMonitor.LOG_TAG, "Debug: "+mObservable.countObservers()+" observers");
+        Log.d(NetworkTrafficMonitor.LOG_TAG, "Speed: "+(inSpeed/1024)+" kb/s (level+"+inNetworkLevel+")");
+        // Compute out network level
+        int outNetworkLevel = 0;
+        for (int i = 0, n = OUT_NETWORK_LEVELS.length; i<n; i++) {
+            if (outSpeed<OUT_NETWORK_LEVELS[i]) {
+                break;
+            }
+            outNetworkLevel++;
         }
-    }
-
-    /**
-     * Get the in network quality level.
-     *
-     * @return The in network quality level.
-     */
-    public int getInNetworkLevel() {
-        return mInNetworkLevel;
+        // Create traffic values
+        TrafficValues values = new TrafficValues(inSpeed, outSpeed, inNetworkLevel, outNetworkLevel, updateDelay);
+        // Mark observable as changed
+        mObservable.setChanged();
+        // Notify observers
+        mObservable.notifyObservers(values);
+        Log.d(NetworkTrafficMonitor.LOG_TAG, "Debug: Notify "+mObservable.countObservers()+" observers");
     }
 
     /**
      * Delegate utility class.
+     *
+     * @author Bruce BUJON (bruce.bujon@gmail.com)
      */
     public class DelegateObservable extends Observable {
         @Override
@@ -246,120 +265,46 @@ public enum NetworkTrafficMonitor {
     }
 
     /**
-     * Observe settings change.
+     * Store traffic values.
      *
      * @author Bruce BUJON (bruce.bujon@gmail.com)
      */
-    public static class SettingsObserver extends ContentObserver {
-        /*
-         * The setting masks.
-         */
+    public static class TrafficValues {
         /**
-         * The meter enabled status mask.
+         * The in network current speed (in bytes/s).
          */
-        public static final int METER_ENABLED_MASK = 0x00000001;
+        public final long inSpeed;
         /**
-         * The text enabled status mask.
+         * The out network current speed (in bytes/s).
          */
-        public static final int TEXT_ENABLED_MASK = 0x00000002;
+        public final long outSpeed;
         /**
-         * The up-stream traffic display mask.
+         * The in network level quality.
          */
-        public static final int UP_TRAFFIC_MASK = 0x00000004;
+        public final int inLevel;
         /**
-         * The down-stream traffic display mask.
+         * The out network level quality.
          */
-        public static final int DOWN_TRAFFIC_MASK = 0x00000008;
+        public final int outLevel;
         /**
-         * The unit switch mask.
+         * The update delay (in ms).
          */
-        public static final int UNIT_SWITCH_MASK = 0x0000000F;
-        /**
-         * The refresh period mask.
-         */
-        public static final int REFRESH_PERIOD_MASK = 0xFFFF0000;
-        /*
-         * Observer related.
-         */
-        /**
-         * The observer context.
-         */
-        private final Context mContext;
-        /**
-         * The observed setting URIs.
-         */
-        private final Set<Uri> mSettingUris;
-        /**
-         * The callback to call on setting change.
-         */
-        private final SettingsChangeCallback mCallback;
-
-        /**
-         * Check a mask on a value.
-         *
-         * @param value The value to test.
-         * @param mask  The mask to test.
-         * @return <code>true</code> if the value contains the mask, <code>otherwise</code>.
-         */
-        public static boolean hasMask(int value, int mask) {
-            return (value&mask)==mask;
-        }
+        public final long updateDelay;
 
         /**
          * Constructor.
          *
-         * @param context      The observer context.
-         * @param settingNames The setting names to observe.
-         * @param callback     The callback to notify on setting change.
+         * @param inSpeed  The in network current speed (in bytes/s).
+         * @param outSpeed The out network current speed (in bytes/s).
+         * @param inLevel  The in network level quality.
+         * @param outLevel The out network level quality.
          */
-        public SettingsObserver(Context context, Set<String> settingNames, SettingsChangeCallback callback) {
-            super(null);
-            // Save observer context
-            mContext = context;
-            // Save observed setting URIs
-            mSettingUris = new HashSet<Uri>(settingNames.size());
-            for (String settingName : settingNames) {
-                mSettingUris.add(Settings.System.getUriFor(settingName));
-            }
-            // Save callback
-            mCallback = callback;
+        public TrafficValues(long inSpeed, long outSpeed, int inLevel, int outLevel, long updateDelay) {
+            this.inSpeed = inSpeed;
+            this.outSpeed = outSpeed;
+            this.inLevel = inLevel;
+            this.outLevel = outLevel;
+            this.updateDelay = updateDelay;
         }
-
-        /**
-         * Register the observer.
-         */
-        public void register() {
-            // Get content resolver
-            ContentResolver resolver = mContext.getContentResolver();
-            // Register the observer for each setting URI
-            for (Uri settingUri : mSettingUris) {
-                resolver.registerContentObserver(settingUri, false, this);
-            }
-        }
-
-        /**
-         * Unregister the observer.
-         */
-        public void unregister() {
-            // Get content resolver
-            ContentResolver resolver = mContext.getContentResolver();
-            // Unregister the observer
-            resolver.unregisterContentObserver(this);
-        }
-
-        @Override
-        public void onChange(boolean selfChange) {
-            // Notify callback
-            mCallback.onSettingChanged();
-        }
-    }
-
-    /**
-     * Callback for setting change.
-     *
-     * @author Bruce BUJON (bruce.bujon@gmail.com)
-     */
-    public interface SettingsChangeCallback {
-        public void onSettingChanged();
     }
 }

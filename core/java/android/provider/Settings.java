@@ -2172,6 +2172,7 @@ public final class Settings {
          * @hide
          */
         public static final String NETWORK_TRAFFIC_AUTOHIDE = "network_traffic_autohide";
+
         /**
          * Network traffic inactivity threshold (default is 10 kBs)
          *

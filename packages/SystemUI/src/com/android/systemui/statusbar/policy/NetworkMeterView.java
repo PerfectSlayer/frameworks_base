@@ -47,6 +47,14 @@ public class NetworkMeterView extends ImageView implements Observer {
      * The network meter log tag.
      */
     private static final String LOG_TAG = "NETWORK_METER";
+    /**
+     * The in network quality level.
+     */
+    protected int mInNetworkLevel;
+    /**
+     * The out network quality level.
+     */
+    protected int mOutNetworkLevel;
     /*
      * View related.
      */
@@ -67,14 +75,14 @@ public class NetworkMeterView extends ImageView implements Observer {
      */
     protected boolean mAttached;
     /** The layer drawable icon. */
-    //protected final LayerDrawable mLayerDrawable;
+    //protected final LayerDrawable mLayerDrawable; // TODO
     /*
      * Settings related.
      */
     /**
      * The settings observer.
      */
-    protected final NetworkTrafficMonitor.SettingsObserver mSettingsObserver;
+    protected final NetworkTrafficSettings.Observer mSettingsObserver;
     /**
      * The intent receiver for connectivity action.
      */
@@ -84,6 +92,7 @@ public class NetworkMeterView extends ImageView implements Observer {
      * Constructor.
      *
      * @param context The application context.
+     * @hide
      */
     public NetworkMeterView(Context context) {
         this(context, null);
@@ -94,6 +103,7 @@ public class NetworkMeterView extends ImageView implements Observer {
      *
      * @param context The application context.
      * @param attrs   The view attribute set.
+     * @hide
      */
     public NetworkMeterView(Context context, AttributeSet attrs) {
         this(context, attrs, 0);
@@ -105,12 +115,16 @@ public class NetworkMeterView extends ImageView implements Observer {
      * @param context      The application context.
      * @param attrs        The view attribute set
      * @param defStyleAttr The view default style attributes.
+     * @hide
      */
     public NetworkMeterView(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
         /*
          * Initialize view.
          */
+        // Initialize network levels
+        mInNetworkLevel = 0;
+        mOutNetworkLevel = 0;
         // Initialize view as detached
         mAttached = false;
         // Create drawables caches
@@ -141,9 +155,9 @@ public class NetworkMeterView extends ImageView implements Observer {
          * Initialize setting monitoring.
          */
         // Create setting observer
-        mSettingsObserver = new NetworkTrafficMonitor.SettingsObserver(mContext,
+        mSettingsObserver = new NetworkTrafficSettings.Observer(mContext,
                 Sets.newHashSet(Settings.System.NETWORK_TRAFFIC_STATE),
-                new NetworkTrafficMonitor.SettingsChangeCallback() {
+                new NetworkTrafficSettings.ChangeCallback() {
                     @Override
                     public void onSettingChanged() {
                         // Update enable status
@@ -211,8 +225,8 @@ public class NetworkMeterView extends ImageView implements Observer {
     protected void updateSettings() {
         // Check status bar network meter setting
         ContentResolver resolver = mContext.getContentResolver();
-        int networkTrafficState = Settings.System.getInt(resolver, Settings.System.network_traffic_state, 0);
-        boolean showMeter = NetworkTrafficMonitor.SettingsObserver.hasMask(networkTrafficState, NetworkTrafficMonitor.SettingsObserver.METER_ENABLED_MASK);
+        int networkTrafficState = Settings.System.getInt(resolver, Settings.System.NETWORK_TRAFFIC_STATE, 0);
+        boolean showMeter = NetworkTrafficSettings.isMeterEnabled(networkTrafficState);
         // Declare visibility
         int visibility;
         // Check if meter should be showed and device is connected
@@ -264,26 +278,35 @@ public class NetworkMeterView extends ImageView implements Observer {
      * Observer.
      */
 
-    long lastUpdateTime;    // TODO remove
+    long mLastUpdateTime;    // TODO remove
 
+    /*
+     * @hide
+     */
     @Override
     public void update(Observable observable, Object data) {
         long tempUpdateTime = SystemClock.elapsedRealtime();
-        long delay = (tempUpdateTime-lastUpdateTime)/1000;
-        Log.d(NetworkMeterView.LOG_TAG, "Delay: "+delay+" s");
-        Log.d(NetworkMeterView.LOG_TAG, "Debug: "+this.hashCode()+" "+isShown());
+        long delay = (tempUpdateTime-mLastUpdateTime)/1000;
+        mLastUpdateTime = tempUpdateTime;
+        Log.d(NetworkMeterView.LOG_TAG, "Debug: Update meter: "+delay+"s "+this.hashCode()+" "+isShown());
 
-        // Check data
-        if (!(data instanceof Integer)) {
-            return;
-        }
-        // Get in network level
-        int inNetworkLevel = ((Integer) data).intValue();
         // Check if view is shown
         if (!isShown()) {
             return;
         }
-        // Update image drawable
-        setImageDrawable(mNetworkInDrawables[inNetworkLevel]);
+        // Check data
+        if (!(data instanceof NetworkTrafficMonitor.TrafficValues)) {
+            return;
+        }
+        NetworkTrafficMonitor.TrafficValues values = (NetworkTrafficMonitor.TrafficValues) data;
+        // Check if in network level quality changed
+        if (mInNetworkLevel!=values.inLevel) {
+            // Save in network level quality
+            mInNetworkLevel = values.inLevel;
+            // Update image drawable
+            setImageDrawable(mNetworkInDrawables[mInNetworkLevel]);
+        }
+        // Check if out network level quality changed
+        // TODO
     }
 }

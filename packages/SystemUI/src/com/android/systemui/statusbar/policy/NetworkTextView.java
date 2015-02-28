@@ -1,6 +1,8 @@
 package com.android.systemui.statusbar.policy;
 
 import java.text.DecimalFormat;
+import java.util.Observable;
+import java.util.Observer;
 
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
@@ -17,6 +19,7 @@ import android.os.Message;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.TextView;
@@ -30,11 +33,16 @@ import com.google.android.collect.Sets;
 * to only use it for a single boolean. 32-bits is plenty of room for what we need it to do.
 *
 */
-public class NetworkTextView extends TextView {
+public class NetworkTextView extends TextView implements Observer {
+    /**
+     * The network meter log tag.
+     */
+    private static final String LOG_TAG = "NETWORK_TEXT";
     private static final int KILOBIT = 1000;
     private static final int KILOBYTE = 1024;
 
     private static DecimalFormat decimalFormat = new DecimalFormat("##0.#");
+
     static {
         decimalFormat.setMaximumIntegerDigits(3);
         decimalFormat.setMaximumFractionDigits(1);
@@ -42,124 +50,13 @@ public class NetworkTextView extends TextView {
 
     private int mState = 0;
     private boolean mAttached;
-    private long totalRxBytes;
-    private long totalTxBytes;
-    private long lastUpdateTime;
     private int txtSizeSingle;
     private int txtSizeMulti;
     private int KB = KILOBIT;
-    private int MB = KB * KB;
-    private int GB = MB * KB;
+    private int MB = KB*KB;
+    private int GB = MB*KB;
     private boolean mAutoHide;
     private int mAutoHideThreshold;
-
-    private Handler mTrafficHandler = new Handler() {
-        @Override
-        public void handleMessage(Message msg) {
-            long timeDelta = SystemClock.elapsedRealtime() - lastUpdateTime;
-
-            if (timeDelta < getInterval(mState) * .95) {
-                if (msg.what != 1) {
-                    // we just updated the view, nothing further to do
-                    return;
-                }
-                if (timeDelta < 1) {
-                    // Can't div by 0 so make sure the value displayed is minimal
-                    timeDelta = Long.MAX_VALUE;
-                }
-            }
-            lastUpdateTime = SystemClock.elapsedRealtime();
-
-            // Calculate the data rate from the change in total bytes and time
-            long newTotalRxBytes = TrafficStats.getTotalRxBytes();
-            long newTotalTxBytes = TrafficStats.getTotalTxBytes();
-            long rxData = newTotalRxBytes - totalRxBytes;
-            long txData = newTotalTxBytes - totalTxBytes;
-
-            if (shouldHide(rxData, txData, timeDelta)) {
-                setText("");
-                setVisibility(View.GONE);
-            } else {
-                // If bit/s convert from Bytes to bits
-                String symbol;
-                if (KB == KILOBYTE) {
-                    symbol = "B/s";
-                } else {
-                    symbol = "b/s";
-                    rxData = rxData * 8;
-                    txData = txData * 8;
-                }
-
-                // Get information for uplink ready so the line return can be added
-                String output = "";
-                if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK)) {
-                    output = formatOutput(timeDelta, txData, symbol);
-                }
-
-                // Ensure text size is where it needs to be
-                int textSize;
-                if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK+NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK)) {
-                    output += "\n";
-                    textSize = txtSizeMulti;
-                } else {
-                    textSize = txtSizeSingle;
-                }
-
-                // Add information for downlink if it's called for
-                if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK)) {
-                    output += formatOutput(timeDelta, rxData, symbol);
-                }
-
-                // Update view if there's anything new to show
-                if (!output.contentEquals(getText())) {
-                    setTextSize(TypedValue.COMPLEX_UNIT_PX, (float)textSize);
-                    setText(output);
-                }
-                setVisibility(View.VISIBLE);
-            }
-
-            // Post delayed message to refresh in ~1000ms
-            totalRxBytes = newTotalRxBytes;
-            totalTxBytes = newTotalTxBytes;
-            clearHandlerCallbacks();
-            mTrafficHandler.postDelayed(mRunnable, getInterval(mState));
-        }
-
-        private String formatOutput(long timeDelta, long data, String symbol) {
-            long speed = (long)(data / (timeDelta / 1000F));
-            if (speed < KB) {
-                return decimalFormat.format(speed) + symbol;
-            } else if (speed < MB) {
-                return decimalFormat.format(speed / (float)KB) + 'k' + symbol;
-            } else if (speed < GB) {
-                return decimalFormat.format(speed / (float)MB) + 'M' + symbol;
-            }
-            return decimalFormat.format(speed / (float)GB) + 'G' + symbol;
-        }
-
-        private boolean shouldHide(long rxData, long txData, long timeDelta) {
-            if (!mAutoHide)
-                return false;
-            long speedTxKB = (long)(txData / (timeDelta / 1000f)) / KILOBYTE;
-            long speedRxKB = (long)(rxData / (timeDelta / 1000f)) / KILOBYTE;
-            if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK+NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK)) {
-                return speedRxKB <= mAutoHideThreshold && speedTxKB <= mAutoHideThreshold;
-            } else if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK)) {
-                return speedRxKB <= mAutoHideThreshold;
-            } else if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK)) {
-                return speedTxKB <= mAutoHideThreshold;
-            } else {
-                return false;
-            }
-        }
-    };
-
-    private Runnable mRunnable = new Runnable() {
-        @Override
-        public void run() {
-            mTrafficHandler.sendEmptyMessage(0);
-        }
-    };
 
     /*
      *  @hide
@@ -183,10 +80,9 @@ public class NetworkTextView extends TextView {
         final Resources resources = getResources();
         txtSizeSingle = resources.getDimensionPixelSize(R.dimen.net_traffic_single_text_size);
         txtSizeMulti = resources.getDimensionPixelSize(R.dimen.net_traffic_multi_text_size);
-        Handler mHandler = new Handler();
-        NetworkTrafficMonitor.SettingsObserver settingsObserver = new NetworkTrafficMonitor.SettingsObserver(mContext,
+        NetworkTrafficSettings.Observer settingsObserver = new NetworkTrafficSettings.Observer(mContext,
                 Sets.newHashSet(Settings.System.NETWORK_TRAFFIC_STATE, Settings.System.NETWORK_TRAFFIC_AUTOHIDE, Settings.System.NETWORK_TRAFFIC_AUTOHIDE_THRESHOLD),
-                new NetworkTrafficMonitor.SettingsChangeCallback() {
+                new NetworkTrafficSettings.ChangeCallback() {
                     @Override
                     public void onSettingChanged() {
                         // Update enable status
@@ -195,6 +91,72 @@ public class NetworkTextView extends TextView {
                 });
         settingsObserver.register();    // TODO save to unregister
         updateSettings();
+    }
+
+    /*
+     * Observer.
+     */
+
+    long mLastUpdateTime;    // TODO remove
+
+    /*
+     * @hide
+     */
+    @Override
+    public void update(Observable observable, Object data) {
+        long tempUpdateTime = SystemClock.elapsedRealtime();
+        long delay = (tempUpdateTime-mLastUpdateTime)/1000;
+        mLastUpdateTime = tempUpdateTime;
+        Log.d(NetworkTextView.LOG_TAG, "Debug: Update text: "+delay+"s "+this.hashCode()+" "+isShown());
+
+        // Check data
+        if (!(data instanceof NetworkTrafficMonitor.TrafficValues)) {
+            return;
+        }
+        NetworkTrafficMonitor.TrafficValues values = (NetworkTrafficMonitor.TrafficValues) data;
+        // Check settings
+        boolean upTraffic = NetworkTrafficSettings.isUpTrafficDisplayed(mState);
+        boolean downTraffic = NetworkTrafficSettings.isDownTrafficDisplayed(mState);
+        // Check if text should hide
+        if (shouldHide(values.inSpeed/1024, values.outSpeed/1024, upTraffic, downTraffic)) {
+            setText("");
+            setVisibility(View.GONE);
+        } else {
+            long inSpeed = values.inSpeed;
+            long outSpeed = values.outSpeed;
+            // If bit/s convert from Bytes to bits
+            String symbol;
+            if (KB==KILOBYTE) {
+                symbol = "B/s";
+            } else {
+                symbol = "b/s";
+                inSpeed *= 8;
+                outSpeed *= 8;
+            }
+            // Get information for uplink ready so the line return can be added
+            String output = "";
+            if (upTraffic) {
+                output = formatOutput(outSpeed, symbol);
+            }
+            // Ensure text size is where it needs to be
+            int textSize;
+            if (upTraffic&&downTraffic) {
+                output += "\n";
+                textSize = txtSizeMulti;
+            } else {
+                textSize = txtSizeSingle;
+            }
+            // Add information for downlink if it's called for
+            if (downTraffic) {
+                output += formatOutput(inSpeed, symbol);
+            }
+            // Update view if there's anything new to show
+            if (!output.contentEquals(getText())) {
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, (float) textSize);
+                setText(output);
+            }
+            setVisibility(View.VISIBLE);
+        }
     }
 
     @Override
@@ -222,7 +184,7 @@ public class NetworkTextView extends TextView {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            if (action != null && action.equals(ConnectivityManager.CONNECTIVITY_ACTION)) {
+            if (action!=null&&action.equals(ConnectivityManager.CONNECTIVITY_ACTION)) {
                 updateSettings();
             }
         }
@@ -231,68 +193,104 @@ public class NetworkTextView extends TextView {
     private boolean getConnectAvailable() {
         ConnectivityManager connManager =
                 (ConnectivityManager) mContext.getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo network = (connManager != null) ? connManager.getActiveNetworkInfo() : null;
-        return network != null && network.isConnected();
+        NetworkInfo network = (connManager!=null) ? connManager.getActiveNetworkInfo() : null;
+        return network!=null&&network.isConnected();
     }
 
     private void updateSettings() {
         ContentResolver resolver = mContext.getContentResolver();
 
         mAutoHide = Settings.System.getIntForUser(resolver, Settings.System.NETWORK_TRAFFIC_AUTOHIDE, 0,
-                UserHandle.USER_CURRENT) == 1;
+                UserHandle.USER_CURRENT)==1;
 
         mAutoHideThreshold = Settings.System.getIntForUser(resolver, Settings.System.NETWORK_TRAFFIC_AUTOHIDE_THRESHOLD,
                 10, UserHandle.USER_CURRENT);
 
         mState = Settings.System.getInt(resolver, Settings.System.NETWORK_TRAFFIC_STATE, 0);
-        if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UNIT_SWITCH_MASK)) {
+
+        Log.e(LOG_TAG, "Debug: state "+mState);
+        if (NetworkTrafficSettings.hasMask(mState, NetworkTrafficSettings.UNIT_SWITCH_MASK)) {
             KB = KILOBYTE;
         } else {
             KB = KILOBIT;
         }
-        MB = KB * KB;
-        GB = MB * KB;
+        MB = KB*KB;
+        GB = MB*KB;
 
-        if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK) ||
-                NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK)) {
-            if (getConnectAvailable()) {
-                if (mAttached) {
-                    totalRxBytes = TrafficStats.getTotalRxBytes();
-                    lastUpdateTime = SystemClock.elapsedRealtime();
-                    mTrafficHandler.sendEmptyMessage(1);
-                }
-                setVisibility(View.VISIBLE);
-                updateTrafficDrawable();
-                return;
+        if (NetworkTrafficSettings.isTextEnabled(mState) && getConnectAvailable()) {
+            if (mAttached) {
+                NetworkTrafficMonitor.INSTANCE.addObserver(this);
             }
+            post(new Runnable() {
+                @Override
+                public void run() {
+                    setVisibility(View.VISIBLE);
+                    updateTrafficDrawable();
+                }
+            });
         } else {
-            clearHandlerCallbacks();
+            NetworkTrafficMonitor.INSTANCE.removeObserver(this);
+            post(new Runnable() {
+                @Override
+                public void run() {
+                    setVisibility(View.GONE);
+                }
+            });
         }
-        setVisibility(View.GONE);
     }
 
     private static int getInterval(int intState) {
-        int intInterval = intState >>> 16;
-        return (intInterval >= 250 && intInterval <= 32750) ? intInterval : 1000;
-    }
-
-    private void clearHandlerCallbacks() {
-        mTrafficHandler.removeCallbacks(mRunnable);
-        mTrafficHandler.removeMessages(0);
-        mTrafficHandler.removeMessages(1);
+        int intInterval = intState>>>16;
+        return (intInterval>=250&&intInterval<=32750) ? intInterval : 1000;
     }
 
     private void updateTrafficDrawable() {
-        int intTrafficDrawable;
-        if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK+NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK)) {
+        // Check settings
+        boolean upTraffic = NetworkTrafficSettings.isUpTrafficDisplayed(mState);
+        boolean downTraffic = NetworkTrafficSettings.isDownTrafficDisplayed(mState);
+        // Compute drawable
+        final int intTrafficDrawable;
+        if (upTraffic&&downTraffic) {
             intTrafficDrawable = R.drawable.stat_sys_network_traffic_updown;
-        } else if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.UP_TRAFFIC_MASK)) {
+        } else if (upTraffic) {
             intTrafficDrawable = R.drawable.stat_sys_network_traffic_up;
-        } else if (NetworkTrafficMonitor.SettingsObserver.hasMask(mState, NetworkTrafficMonitor.SettingsObserver.DOWN_TRAFFIC_MASK)) {
+        } else if (downTraffic) {
             intTrafficDrawable = R.drawable.stat_sys_network_traffic_down;
         } else {
             intTrafficDrawable = 0;
         }
+        // Apply drawable
         setCompoundDrawablesWithIntrinsicBounds(0, 0, intTrafficDrawable, 0);
+    }
+
+    private boolean shouldHide(long inSpeed, long outSpeed, boolean upTraffic, boolean downTraffic) {
+        Log.e(LOG_TAG, "Should hide auto: "+mAutoHide);
+        if (!mAutoHide) {
+            return false;
+        }
+        if (downTraffic&&upTraffic) {
+            Log.e(LOG_TAG, "Should hide both");
+            return inSpeed<=mAutoHideThreshold&&outSpeed<=mAutoHideThreshold;
+        } else if (downTraffic) {
+            Log.e(LOG_TAG, "Should hide down");
+            return inSpeed<=mAutoHideThreshold;
+        } else if (upTraffic) {
+            Log.e(LOG_TAG, "Should hide up");
+            return outSpeed<=mAutoHideThreshold;
+        } else {
+            Log.e(LOG_TAG, "Should hide hidden");
+            return false;
+        }
+    }
+
+    private String formatOutput(long speed, String symbol) {
+        if (speed<KB) {
+            return decimalFormat.format(speed)+symbol;
+        } else if (speed<MB) {
+            return decimalFormat.format(speed/(float) KB)+'k'+symbol;
+        } else if (speed<GB) {
+            return decimalFormat.format(speed/(float) MB)+'M'+symbol;
+        }
+        return decimalFormat.format(speed/(float) GB)+'G'+symbol;
     }
 }
