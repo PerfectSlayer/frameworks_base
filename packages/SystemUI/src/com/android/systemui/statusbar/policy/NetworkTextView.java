@@ -12,14 +12,9 @@ import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.net.TrafficStats;
-import android.os.Handler;
 import android.os.UserHandle;
-import android.os.Message;
-import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.TextView;
@@ -58,22 +53,22 @@ public class NetworkTextView extends TextView implements Observer {
     private boolean mAutoHide;
     private int mAutoHideThreshold;
 
-    /*
-     *  @hide
+    /**
+     * @hide
      */
     public NetworkTextView(Context context) {
         this(context, null);
     }
 
-    /*
-     *  @hide
+    /**
+     * @hide
      */
     public NetworkTextView(Context context, AttributeSet attrs) {
         this(context, attrs, 0);
     }
 
-    /*
-     *  @hide
+    /**
+     * @hide
      */
     public NetworkTextView(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
@@ -89,26 +84,15 @@ public class NetworkTextView extends TextView implements Observer {
                         updateSettings();
                     }
                 });
-        settingsObserver.register();    // TODO save to unregister
+        settingsObserver.register();
         updateSettings();
     }
 
-    /*
-     * Observer.
-     */
-
-    long mLastUpdateTime;    // TODO remove
-
-    /*
+    /**
      * @hide
      */
     @Override
     public void update(Observable observable, Object data) {
-        long tempUpdateTime = SystemClock.elapsedRealtime();
-        long delay = (tempUpdateTime-mLastUpdateTime)/1000;
-        mLastUpdateTime = tempUpdateTime;
-        Log.d(NetworkTextView.LOG_TAG, "Debug: Update text: "+delay+"s "+this.hashCode()+" "+isShown());
-
         // Check data
         if (!(data instanceof NetworkTrafficMonitor.TrafficValues)) {
             return;
@@ -208,7 +192,6 @@ public class NetworkTextView extends TextView implements Observer {
 
         mState = Settings.System.getInt(resolver, Settings.System.NETWORK_TRAFFIC_STATE, 0);
 
-        Log.e(LOG_TAG, "Debug: state "+mState);
         if (NetworkTrafficSettings.hasMask(mState, NetworkTrafficSettings.UNIT_SWITCH_MASK)) {
             KB = KILOBYTE;
         } else {
@@ -237,11 +220,9 @@ public class NetworkTextView extends TextView implements Observer {
                 }
             });
         }
-    }
 
-    private static int getInterval(int intState) {
-        int intInterval = intState>>>16;
-        return (intInterval>=250&&intInterval<=32750) ? intInterval : 1000;
+        int updateInterval = NetworkTrafficSettings.getUpdateInterval(mState);
+        NetworkTrafficMonitor.INSTANCE.setUpdateInterval(updateInterval);
     }
 
     private void updateTrafficDrawable() {
@@ -264,21 +245,16 @@ public class NetworkTextView extends TextView implements Observer {
     }
 
     private boolean shouldHide(long inSpeed, long outSpeed, boolean upTraffic, boolean downTraffic) {
-        Log.e(LOG_TAG, "Should hide auto: "+mAutoHide);
         if (!mAutoHide) {
             return false;
         }
         if (downTraffic&&upTraffic) {
-            Log.e(LOG_TAG, "Should hide both");
             return inSpeed<=mAutoHideThreshold&&outSpeed<=mAutoHideThreshold;
         } else if (downTraffic) {
-            Log.e(LOG_TAG, "Should hide down");
             return inSpeed<=mAutoHideThreshold;
         } else if (upTraffic) {
-            Log.e(LOG_TAG, "Should hide up");
             return outSpeed<=mAutoHideThreshold;
         } else {
-            Log.e(LOG_TAG, "Should hide hidden");
             return false;
         }
     }

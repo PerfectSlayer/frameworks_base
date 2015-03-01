@@ -36,9 +36,9 @@ public class NetworkTrafficSettings {
      */
     public static final int UNIT_SWITCH_MASK = 0x00000010;
     /**
-     * The refresh period mask.
+     * The update interval mask.
      */
-    public static final int REFRESH_PERIOD_MASK = 0xFFFF0000;
+    public static final int UPDATE_INTERVAL_MASK = 0xFFFF0000;
 
     /**
      * Check if the meter is enabled.
@@ -78,6 +78,23 @@ public class NetworkTrafficSettings {
      */
     public static boolean isDownTrafficDisplayed(int state) {
         return hasMask(state, DOWN_TRAFFIC_MASK);
+    }
+
+    /**
+     * Get the update interval.
+     *
+     * @param state The state of the network traffic monitor.
+     * @return The update interval (in ms).
+     */
+    public static int getUpdateInterval(int state) {
+        // Get update interval
+        int updateInterval = state>>>16;
+        // Check bounds
+        if (updateInterval<250||updateInterval>30000) {
+            updateInterval = 200;
+        }
+        // Return update interval
+        return updateInterval;
     }
 
     /**

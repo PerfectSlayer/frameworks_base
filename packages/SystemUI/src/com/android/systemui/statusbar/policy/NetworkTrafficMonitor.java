@@ -16,22 +16,13 @@
 
 package com.android.systemui.statusbar.policy;
 
-import android.content.ContentResolver;
-import android.content.Context;
-import android.database.ContentObserver;
 import android.net.TrafficStats;
-import android.net.Uri;
 import android.os.Handler;
 import android.os.SystemClock;
-import android.provider.Settings;
 import android.util.Log;
 
-import java.lang.Override;
-import java.lang.String;
-import java.util.HashSet;
 import java.util.Observable;
 import java.util.Observer;
-import java.util.Set;
 
 /**
  * Monitor traffic network.
@@ -164,6 +155,68 @@ public enum NetworkTrafficMonitor {
     }
 
     /**
+     * Set the update interval.
+     *
+     * @param updateInterval The update interval (in ms).
+     */
+    public void setUpdateInterval(long updateInterval) {
+        this.mTrafficUpdateInterval = updateInterval;
+    }
+
+    /**
+     * Monitor traffic.<br/>
+     * Compute network quality levels based on data received and transmitted.
+     */
+    protected void monitorTraffic() {
+        // Get current time
+        long lastUpdateTime = SystemClock.elapsedRealtime();
+        // Compute update delay
+        long updateDelay = lastUpdateTime-mLastUpdateTime;
+        // Save last update time
+        mLastUpdateTime = lastUpdateTime;
+        Log.d(NetworkTrafficMonitor.LOG_TAG, "Delay: "+updateDelay+"ms");
+        if (updateDelay<=250) {
+            return;
+        }
+        // Get total received bytes
+        long totalRxBytes = TrafficStats.getTotalRxBytes();
+        // Get total transmitted bytes
+        long totalTxBytes = TrafficStats.getTotalTxBytes();
+        // Compute in network speed
+        long inSpeed = (totalRxBytes-mTotalRxBytes)*1000/updateDelay;
+        // Compute out network speed
+        long outSpeed = (totalTxBytes-mTotalTxBytes)*1000/updateDelay;
+        // Save total received bytes
+        mTotalRxBytes = totalRxBytes;
+        // Save total transmitted bytes
+        mTotalTxBytes = totalTxBytes;
+        // Compute in network level
+        int inNetworkLevel = 0;
+        for (int i = 0, n = IN_NETWORK_LEVELS.length; i<n; i++) {
+            if (inSpeed<IN_NETWORK_LEVELS[i]) {
+                break;
+            }
+            inNetworkLevel++;
+        }
+        Log.d(NetworkTrafficMonitor.LOG_TAG, "Speed: "+(inSpeed/1024)+" kb/s (level+"+inNetworkLevel+")");
+        // Compute out network level
+        int outNetworkLevel = 0;
+        for (int i = 0, n = OUT_NETWORK_LEVELS.length; i<n; i++) {
+            if (outSpeed<OUT_NETWORK_LEVELS[i]) {
+                break;
+            }
+            outNetworkLevel++;
+        }
+        // Create traffic values
+        TrafficValues values = new TrafficValues(inSpeed, outSpeed, inNetworkLevel, outNetworkLevel);
+        // Mark observable as changed
+        mObservable.setChanged();
+        // Notify observers
+        mObservable.notifyObservers(values);
+        Log.d(NetworkTrafficMonitor.LOG_TAG, "Debug: Notify "+mObservable.countObservers()+" observers");
+    }
+
+    /**
      * Start the traffic monitor.
      */
     private void startTrafficMonitor() {
@@ -200,59 +253,6 @@ public enum NetworkTrafficMonitor {
     }
 
     /**
-     * Monitor traffic.<br/>
-     * Compute network quality levels based on data received and transmitted.
-     */
-    protected void monitorTraffic() {
-        // Get current time
-        long lastUpdateTime = SystemClock.elapsedRealtime();
-        // Compute update delay
-        long updateDelay = (lastUpdateTime-mLastUpdateTime)/1000;
-        // Save last update time
-        mLastUpdateTime = lastUpdateTime;
-        Log.d(NetworkTrafficMonitor.LOG_TAG, "Delay: "+updateDelay+" s");
-        if (updateDelay==0) {
-            return;
-        }
-        // Get total received bytes
-        long totalRxBytes = TrafficStats.getTotalRxBytes();
-        // Get total transmitted bytes
-        long totalTxBytes = TrafficStats.getTotalTxBytes();
-        // Compute in network speed
-        long inSpeed = (totalRxBytes-mTotalRxBytes)/updateDelay;
-        // Compute out network speed
-        long outSpeed = (totalTxBytes-mTotalTxBytes)/updateDelay;
-        // Save total received bytes
-        mTotalRxBytes = totalRxBytes;
-        // Save total transmitted bytes
-        mTotalTxBytes = totalTxBytes;
-        // Compute in network level
-        int inNetworkLevel = 0;
-        for (int i = 0, n = IN_NETWORK_LEVELS.length; i<n; i++) {
-            if (inSpeed<IN_NETWORK_LEVELS[i]) {
-                break;
-            }
-            inNetworkLevel++;
-        }
-        Log.d(NetworkTrafficMonitor.LOG_TAG, "Speed: "+(inSpeed/1024)+" kb/s (level+"+inNetworkLevel+")");
-        // Compute out network level
-        int outNetworkLevel = 0;
-        for (int i = 0, n = OUT_NETWORK_LEVELS.length; i<n; i++) {
-            if (outSpeed<OUT_NETWORK_LEVELS[i]) {
-                break;
-            }
-            outNetworkLevel++;
-        }
-        // Create traffic values
-        TrafficValues values = new TrafficValues(inSpeed, outSpeed, inNetworkLevel, outNetworkLevel, updateDelay);
-        // Mark observable as changed
-        mObservable.setChanged();
-        // Notify observers
-        mObservable.notifyObservers(values);
-        Log.d(NetworkTrafficMonitor.LOG_TAG, "Debug: Notify "+mObservable.countObservers()+" observers");
-    }
-
-    /**
      * Delegate utility class.
      *
      * @author Bruce BUJON (bruce.bujon@gmail.com)
@@ -286,25 +286,20 @@ public enum NetworkTrafficMonitor {
          * The out network level quality.
          */
         public final int outLevel;
-        /**
-         * The update delay (in ms).
-         */
-        public final long updateDelay;
 
         /**
          * Constructor.
          *
-         * @param inSpeed  The in network current speed (in bytes/s).
-         * @param outSpeed The out network current speed (in bytes/s).
-         * @param inLevel  The in network level quality.
-         * @param outLevel The out network level quality.
+         * @param inSpeed     The in network current speed (in bytes/s).
+         * @param outSpeed    The out network current speed (in bytes/s).
+         * @param inLevel     The in network level quality.
+         * @param outLevel    The out network level quality.
          */
-        public TrafficValues(long inSpeed, long outSpeed, int inLevel, int outLevel, long updateDelay) {
+        public TrafficValues(long inSpeed, long outSpeed, int inLevel, int outLevel) {
             this.inSpeed = inSpeed;
             this.outSpeed = outSpeed;
             this.inLevel = inLevel;
             this.outLevel = outLevel;
-            this.updateDelay = updateDelay;
         }
     }
 }

@@ -25,10 +25,8 @@ import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import com.android.systemui.R;
@@ -179,6 +177,31 @@ public class NetworkMeterView extends ImageView implements Observer {
         updateSettings();
     }
 
+    /**
+     * @hide
+     */
+    @Override
+    public void update(Observable observable, Object data) {
+        // Check if view is shown
+        if (!isShown()) {
+            return;
+        }
+        // Check data
+        if (!(data instanceof NetworkTrafficMonitor.TrafficValues)) {
+            return;
+        }
+        NetworkTrafficMonitor.TrafficValues values = (NetworkTrafficMonitor.TrafficValues) data;
+        // Check if in network level quality changed
+        if (mInNetworkLevel!=values.inLevel) {
+            // Save in network level quality
+            mInNetworkLevel = values.inLevel;
+            // Update image drawable
+            setImageDrawable(mNetworkInDrawables[mInNetworkLevel]);
+        }
+        // Check if out network level quality changed
+        // TODO
+    }
+
     @Override
     protected void onAttachedToWindow() {
         // Delegate view attachment
@@ -226,7 +249,12 @@ public class NetworkMeterView extends ImageView implements Observer {
         // Check status bar network meter setting
         ContentResolver resolver = mContext.getContentResolver();
         int networkTrafficState = Settings.System.getInt(resolver, Settings.System.NETWORK_TRAFFIC_STATE, 0);
+        // Get display setting
         boolean showMeter = NetworkTrafficSettings.isMeterEnabled(networkTrafficState);
+        // Get update interval setting
+        int updateInterval = NetworkTrafficSettings.getUpdateInterval(networkTrafficState);
+        // Apply update interval
+        NetworkTrafficMonitor.INSTANCE.setUpdateInterval(updateInterval);
         // Declare visibility
         int visibility;
         // Check if meter should be showed and device is connected
@@ -272,41 +300,5 @@ public class NetworkMeterView extends ImageView implements Observer {
         }
         // Check if active network is connected
         return networkInfo.isConnected();
-    }
-
-    /*
-     * Observer.
-     */
-
-    long mLastUpdateTime;    // TODO remove
-
-    /*
-     * @hide
-     */
-    @Override
-    public void update(Observable observable, Object data) {
-        long tempUpdateTime = SystemClock.elapsedRealtime();
-        long delay = (tempUpdateTime-mLastUpdateTime)/1000;
-        mLastUpdateTime = tempUpdateTime;
-        Log.d(NetworkMeterView.LOG_TAG, "Debug: Update meter: "+delay+"s "+this.hashCode()+" "+isShown());
-
-        // Check if view is shown
-        if (!isShown()) {
-            return;
-        }
-        // Check data
-        if (!(data instanceof NetworkTrafficMonitor.TrafficValues)) {
-            return;
-        }
-        NetworkTrafficMonitor.TrafficValues values = (NetworkTrafficMonitor.TrafficValues) data;
-        // Check if in network level quality changed
-        if (mInNetworkLevel!=values.inLevel) {
-            // Save in network level quality
-            mInNetworkLevel = values.inLevel;
-            // Update image drawable
-            setImageDrawable(mNetworkInDrawables[mInNetworkLevel]);
-        }
-        // Check if out network level quality changed
-        // TODO
     }
 }
